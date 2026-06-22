@@ -3,6 +3,9 @@ import { motion, AnimatePresence } from "motion/react";
 import { ChevronDown } from "lucide-react";
 import { VideoPhrase } from "../types";
 
+// @ts-ignore - Import the video asset using Vite's bundler and hashing
+import DEFAULT_VIDEO_URL from "../assets/Satellite_zooming_out_from_Earth_202606202308.mp4";
+
 const PHRASES: VideoPhrase[] = [
   {
     range: [0.0, 0.22],
@@ -38,9 +41,7 @@ const PHRASES: VideoPhrase[] = [
   }
 ];
 
-// Local optimized satellite zooming out from Earth video
-const DEFAULT_VIDEO_URL = "Satellite_zooming_out_from_Earth_202606202308.mp4";
-
+// Video hero layout interface
 interface VideoHeroProps {
   onScrollToSection: (sectionId: string) => void;
 }
