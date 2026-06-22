@@ -71,6 +71,9 @@ export default function VideoHero({ onScrollToSection }: VideoHeroProps) {
     const checkAndInitMetadata = () => {
       if (video.duration && video.duration > 0) {
         setVideoDuration(video.duration);
+        currentTimeRef.current = 0.1;
+        targetTimeRef.current = 0.1;
+        video.currentTime = 0.1;
         setMetadataLoaded(true);
         setIsVideoReady(true);
         clearInterval(pollInterval);
@@ -79,6 +82,7 @@ export default function VideoHero({ onScrollToSection }: VideoHeroProps) {
         video.play()
           .then(() => {
             video.pause();
+            video.currentTime = 0.1; // pula o frame preto inicial
           })
           .catch((err) => {
             console.log("Decoder warming did not start automatically or was blocked by browser autoplay rules. Safe to ignore.", err);
@@ -217,6 +221,7 @@ export default function VideoHero({ onScrollToSection }: VideoHeroProps) {
           autoPlay={false}
           controls={false}
           preload="auto"
+          crossOrigin="anonymous"
           className="absolute inset-0 w-full h-full object-cover z-0 opacity-70"
           style={{ willChange: "transform, filter" }}
         >
