@@ -39,7 +39,7 @@ const PHRASES: VideoPhrase[] = [
 ];
 
 // Local optimized satellite zooming out from Earth video
-const DEFAULT_VIDEO_URL = "/Satellite_zooming_out_from_Earth_202606202308.mp4";
+const DEFAULT_VIDEO_URL = `${import.meta.env.BASE_URL || "/"}Satellite_zooming_out_from_Earth_202606202308.mp4`;
 
 interface VideoHeroProps {
   onScrollToSection: (sectionId: string) => void;
