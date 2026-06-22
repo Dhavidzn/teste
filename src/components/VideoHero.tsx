@@ -40,7 +40,6 @@ const PHRASES: VideoPhrase[] = [
   }
 ];
 
-// Video hero layout interface
 interface VideoHeroProps {
   onScrollToSection: (sectionId: string) => void;
 }
@@ -50,103 +49,72 @@ export default function VideoHero({ onScrollToSection }: VideoHeroProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
 
   const [scrollProgress, setScrollProgress] = useState(0);
-  const [isVideoReady, setIsVideoReady] = useState(false);
-  const [metadataLoaded, setMetadataLoaded] = useState(false);
   const [videoDuration, setVideoDuration] = useState(0);
 
-  // Targets and actual interpolated current times for buttery-smooth scrubbing
-  const targetTimeRef = useRef(0);
-  const currentTimeRef = useRef(0);
-  const isScrubbingRef = useRef(false);
+  const targetTimeRef = useRef(0.1);
+  const currentTimeRef = useRef(0.1);
+  const initializedRef = useRef(false);
 
-  // Robust Video Metadata Initialization (Fixes the 304 cached video blackout issue)
+  // ── Inicialização do vídeo ──────────────────────────────────────────────────
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
 
-    let initAttempts = 0;
-    const maxAttempts = 15;
-    let pollInterval: NodeJS.Timeout;
+    const init = () => {
+      if (initializedRef.current) return;
+      if (!video.duration || video.duration <= 0) return;
 
-    const checkAndInitMetadata = () => {
-      if (video.duration && video.duration > 0) {
-        setVideoDuration(video.duration);
-        currentTimeRef.current = 0.1;
-        targetTimeRef.current = 0.1;
-        video.currentTime = 0.1;
-        setMetadataLoaded(true);
-        setIsVideoReady(true);
-        clearInterval(pollInterval);
-        
-        // Cozy play/pause trigger to warm up the video decoder and ensure the first frame renders
-        video.play()
-          .then(() => {
-            video.pause();
-            video.currentTime = 0.1; // pula o frame preto inicial
-          })
-          .catch((err) => {
-            console.log("Decoder warming did not start automatically or was blocked by browser autoplay rules. Safe to ignore.", err);
-          });
-      }
+      initializedRef.current = true;
+      setVideoDuration(video.duration);
+      video.currentTime = 0.1;
+      currentTimeRef.current = 0.1;
+      targetTimeRef.current = 0.1;
     };
 
-    // Attach robust listeners for all possible events
-    video.addEventListener("loadedmetadata", checkAndInitMetadata);
-    video.addEventListener("loadeddata", checkAndInitMetadata);
-    video.addEventListener("durationchange", checkAndInitMetadata);
-    video.addEventListener("canplay", checkAndInitMetadata);
-
-    // 1. Check immediately if metadata and duration are already available (cached hit / 304 check)
-    if (video.readyState >= 1 || (video.duration && video.duration > 0)) {
-      checkAndInitMetadata();
-    } else {
-      // 2. Poll briefly in case the event calls are skipped on fast caches
-      pollInterval = setInterval(() => {
-        initAttempts++;
-        if (video.duration && video.duration > 0) {
-          checkAndInitMetadata();
-        } else if (initAttempts >= maxAttempts) {
-          clearInterval(pollInterval);
-        }
-      }, 200);
+    // Tenta imediatamente (caso 304 cache já carregou tudo)
+    if (video.readyState >= 2) {
+      init();
+      return;
     }
 
+    video.addEventListener("loadeddata", init);
+    video.addEventListener("canplay", init);
+
+    // Fallback de polling para browsers que suprimem eventos em cache hit
+    const poll = setInterval(() => {
+      if (video.readyState >= 2 || video.duration > 0) {
+        init();
+        clearInterval(poll);
+      }
+    }, 100);
+
     return () => {
-      video.removeEventListener("loadedmetadata", checkAndInitMetadata);
-      video.removeEventListener("loadeddata", checkAndInitMetadata);
-      video.removeEventListener("durationchange", checkAndInitMetadata);
-      video.removeEventListener("canplay", checkAndInitMetadata);
-      if (pollInterval) clearInterval(pollInterval);
+      video.removeEventListener("loadeddata", init);
+      video.removeEventListener("canplay", init);
+      clearInterval(poll);
     };
   }, []);
 
-  // Manage Scroll Position and update Target Video Time
+  // ── Scroll → atualiza targetTime ───────────────────────────────────────────
   useEffect(() => {
     const handleScroll = () => {
       const container = containerRef.current;
       if (!container) return;
 
       const rect = container.getBoundingClientRect();
-      const containerHeight = rect.height;
-      const viewportHeight = window.innerHeight;
+      const totalScrollable = container.scrollHeight - window.innerHeight;
+      const scrolled = -rect.top;
 
-      // scrollY relative to the container start
-      const containerScrollTop = -rect.top;
-      const totalScrollableArea = containerHeight - viewportHeight;
-
-      let progress = containerScrollTop / totalScrollableArea;
-      progress = Math.max(0, Math.min(1, progress));
+      let progress = Math.max(0, Math.min(1, scrolled / totalScrollable));
       setScrollProgress(progress);
 
-      if (videoRef.current && videoDuration > 0) {
-        targetTimeRef.current = progress * videoDuration;
+      if (videoDuration > 0) {
+        targetTimeRef.current = 0.1 + progress * (videoDuration - 0.1);
       }
     };
 
     window.addEventListener("scroll", handleScroll, { passive: true });
     window.addEventListener("resize", handleScroll);
-    
-    // Initial calculation
     handleScroll();
 
     return () => {
@@ -155,37 +123,29 @@ export default function VideoHero({ onScrollToSection }: VideoHeroProps) {
     };
   }, [videoDuration]);
 
-  // Buttery-smooth lerp interpolation using requestAnimationFrame
+  // ── rAF: interpola currentTime suavemente ──────────────────────────────────
   useEffect(() => {
+    if (videoDuration <= 0) return;
+
     let animId: number;
 
-    const lerpUpdate = () => {
+    const tick = () => {
       const video = videoRef.current;
-      if (video && videoDuration > 0) {
-        // High smoothness coefficient: 0.15 for incredibly fluid and responsive frame seeking
+      if (video) {
         const diff = targetTimeRef.current - currentTimeRef.current;
-        
-        if (Math.abs(diff) > 0.002) {
-          isScrubbingRef.current = true;
-          currentTimeRef.current += diff * 0.15;
-          
-          // Clamp to ensure safety
-          if (currentTimeRef.current < 0) currentTimeRef.current = 0;
-          if (currentTimeRef.current > videoDuration) currentTimeRef.current = videoDuration;
-          
+        if (Math.abs(diff) > 0.001) {
+          currentTimeRef.current += diff * 0.12;
+          currentTimeRef.current = Math.max(0.1, Math.min(videoDuration, currentTimeRef.current));
           video.currentTime = currentTimeRef.current;
-        } else {
-          isScrubbingRef.current = false;
         }
       }
-      animId = requestAnimationFrame(lerpUpdate);
+      animId = requestAnimationFrame(tick);
     };
 
-    animId = requestAnimationFrame(lerpUpdate);
+    animId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(animId);
   }, [videoDuration]);
 
-  // Get active text phrase based on scroll progress
   const activePhrase = PHRASES.find(
     (p) => scrollProgress >= p.range[0] && scrollProgress <= p.range[1]
   );
@@ -195,12 +155,11 @@ export default function VideoHero({ onScrollToSection }: VideoHeroProps) {
       ref={containerRef}
       id="hero"
       className="relative w-full"
-      style={{ height: "380vh" }} // Sufficient scroll depth to explore cinematic assets
+      style={{ height: "380vh" }}
     >
-      {/* Sticky viewport frame containing the viewport video */}
       <div className="sticky top-0 left-0 w-full h-screen overflow-hidden bg-[#050505] z-10 select-none">
-        
-        {/* Background Atmosphere: Simulating Earth Observation from Immersive UI */}
+
+        {/* Background Atmosphere */}
         <div className="absolute inset-0 z-0">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_40%,_#111e29_0%,_#050505_70%)] opacity-70"></div>
           <div className="absolute inset-0 opacity-20" style={{ backgroundImage: "radial-gradient(#ffffff1a 1px, transparent 1px)", backgroundSize: "40px 40px" }}></div>
@@ -208,30 +167,23 @@ export default function VideoHero({ onScrollToSection }: VideoHeroProps) {
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] border border-[#00f2ff]/5 rounded-full pointer-events-none"></div>
         </div>
 
-        {/* Cinematic dark glowing edge overlays */}
+        {/* Edge overlays */}
         <div className="absolute inset-0 bg-gradient-to-b from-black/80 via-transparent to-[#050505] z-20 pointer-events-none" />
         <div className="absolute inset-y-0 left-0 w-32 bg-gradient-to-r from-[#050505]/80 to-transparent z-20 pointer-events-none" />
         <div className="absolute inset-y-0 right-0 w-32 bg-gradient-to-l from-[#050505]/80 to-transparent z-20 pointer-events-none" />
 
-        {/* Dynamic Video Element */}
+        {/* Vídeo — SEM crossOrigin para evitar bloqueio de CORS na Vercel */}
         <video
           ref={videoRef}
           muted
           playsInline
-          autoPlay={false}
-          controls={false}
           preload="auto"
-          crossOrigin="anonymous"
           className="absolute inset-0 w-full h-full object-cover z-0 opacity-70"
-          style={{ willChange: "transform, filter" }}
         >
           <source src={DEFAULT_VIDEO_URL} type="video/mp4" />
-          Seu navegador não suporta a tag de vídeo html5.
         </video>
 
-
-
-        {/* Top Scroll Indicator Line */}
+        {/* Top progress bar */}
         <div className="absolute top-0 left-0 w-full h-[3px] bg-white/5 z-30">
           <motion.div
             className="h-full bg-gradient-to-r from-[#00f2ff] via-cyan-400 to-blue-500"
@@ -239,7 +191,7 @@ export default function VideoHero({ onScrollToSection }: VideoHeroProps) {
           />
         </div>
 
-        {/* Side Progress Gauge (Cinematic UI Element) */}
+        {/* Side progress gauge */}
         <div className="absolute left-6 md:left-12 top-1/2 -translate-y-1/2 z-30 hidden sm:flex flex-col items-center gap-4">
           <span className="font-mono text-[9px] text-gray-500 tracking-widest uppercase rotate-90 origin-left translate-x-1 translate-y-12">
             Progress
@@ -255,7 +207,7 @@ export default function VideoHero({ onScrollToSection }: VideoHeroProps) {
           </span>
         </div>
 
-        {/* Central HUD / Telemetry Interface */}
+        {/* HUD */}
         <div className="absolute right-6 md:right-12 top-6 md:top-[88px] z-30 flex flex-col items-end gap-1 font-mono text-[9px] text-gray-400 leading-none bg-[#050505]/60 backdrop-blur-md border border-[#00f2ff]/20 p-3 rounded-sm">
           <div className="flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-[#00f2ff] animate-pulse" />
@@ -271,7 +223,7 @@ export default function VideoHero({ onScrollToSection }: VideoHeroProps) {
           )}
         </div>
 
-        {/* Synced Text Sequence (Emerge and Dissolve based on Scroll) */}
+        {/* Text phrases */}
         <div className="absolute inset-0 z-20 flex items-center justify-center px-6 md:px-12 pointer-events-none">
           <div className="max-w-3xl text-center flex flex-col items-center">
             <AnimatePresence mode="wait">
@@ -284,36 +236,27 @@ export default function VideoHero({ onScrollToSection }: VideoHeroProps) {
                   transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
                   className="flex flex-col items-center"
                 >
-                  {/* Subtle Accent Tag */}
                   <span className="font-mono text-[10px] md:text-xs tracking-[0.3em] text-[#00f2ff] uppercase mb-4 px-3 py-1 border border-[#00f2ff]/30 bg-[#00f2ff]/5 rounded-sm select-none">
                     {activePhrase.tagline}
                   </span>
-
-                  {/* Micro Heading */}
                   <h1 className="font-display font-light tracking-tighter text-4xl sm:text-5xl md:text-6xl lg:text-[5.5rem] text-white leading-none mb-8 italic underline decoration-[#00f2ff]/30 underline-offset-8">
                     {activePhrase.title.split(" ").slice(0, -1).join(" ")}{" "}
                     <span className="font-bold not-italic text-transparent bg-clip-text bg-gradient-to-r from-white to-[#00f2ff]">
                       {activePhrase.title.split(" ").slice(-1)[0]}
                     </span>
                   </h1>
-
-                  {/* Paragraph */}
                   <p className="font-sans text-sm md:text-base text-gray-300/90 leading-relaxed max-w-xl mb-12 font-light">
                     {activePhrase.description}
                   </p>
-
-                  {/* Refined Small CTA Button (Simulated on top Layer) */}
                   <div className="pointer-events-auto">
                     <button
                       onClick={() => {
-                        // Scroll slightly to advance
                         const nextProgress = scrollProgress + 0.25;
                         if (nextProgress >= 1.0) {
                           onScrollToSection("sobre");
                         } else {
                           const container = containerRef.current;
                           if (container) {
-                            const rect = container.getBoundingClientRect();
                             const totalScroll = container.scrollHeight - window.innerHeight;
                             window.scrollTo({
                               top: window.scrollY + (totalScroll * 0.25),
@@ -324,7 +267,6 @@ export default function VideoHero({ onScrollToSection }: VideoHeroProps) {
                       }}
                       className="group relative inline-flex items-center gap-2 overflow-hidden px-6 py-3 rounded-sm border border-white/20 hover:border-[#00f2ff]/50 bg-[#050505]/60 backdrop-blur-md text-white text-xs tracking-widest uppercase transition-all duration-300 cursor-pointer"
                     >
-                      {/* Hover Slide Background Effect */}
                       <span className="absolute inset-0 bg-gradient-to-r from-[#00f2ff]/10 to-blue-500/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                       <span>{activePhrase.ctaText}</span>
                       <ChevronDown className="w-3.5 h-3.5 group-hover:translate-y-0.5 transition-transform text-[#00f2ff]" />
@@ -332,7 +274,6 @@ export default function VideoHero({ onScrollToSection }: VideoHeroProps) {
                   </div>
                 </motion.div>
               ) : (
-                /* Empty spatial void when transitioning */
                 <motion.div
                   key="transit"
                   initial={{ opacity: 0 }}
@@ -347,8 +288,8 @@ export default function VideoHero({ onScrollToSection }: VideoHeroProps) {
           </div>
         </div>
 
-        {/* Scroll prompt badge at dead center bottom */}
-        <div className="absolute bottom-10 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-2 cursor-pointer select-none pointer-events-none">
+        {/* Scroll prompt */}
+        <div className="absolute bottom-10 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-2 select-none pointer-events-none">
           <span className="font-mono text-[9px] tracking-[0.2em] text-[#00f2ff]/75 uppercase">
             {scrollProgress >= 0.95 ? "Role para continuar" : "Gire o Scroll do mouse"}
           </span>
@@ -360,8 +301,6 @@ export default function VideoHero({ onScrollToSection }: VideoHeroProps) {
             <div className="w-1 h-2 bg-[#00f2ff] rounded-full" />
           </motion.div>
         </div>
-
-
 
       </div>
     </div>
