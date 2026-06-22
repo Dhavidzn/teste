@@ -3,7 +3,6 @@ import { motion, AnimatePresence } from "motion/react";
 import { ChevronDown } from "lucide-react";
 import { VideoPhrase } from "../types";
 
-// @ts-ignore - Import the video asset using Vite's bundler and hashing
 import DEFAULT_VIDEO_URL from "../assets/Satellite_zooming_out_from_Earth_202606202308.mp4";
 
 const PHRASES: VideoPhrase[] = [
@@ -59,6 +58,63 @@ export default function VideoHero({ onScrollToSection }: VideoHeroProps) {
   const targetTimeRef = useRef(0);
   const currentTimeRef = useRef(0);
   const isScrubbingRef = useRef(false);
+
+  // Robust Video Metadata Initialization (Fixes the 304 cached video blackout issue)
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    let initAttempts = 0;
+    const maxAttempts = 15;
+    let pollInterval: NodeJS.Timeout;
+
+    const checkAndInitMetadata = () => {
+      if (video.duration && video.duration > 0) {
+        setVideoDuration(video.duration);
+        setMetadataLoaded(true);
+        setIsVideoReady(true);
+        clearInterval(pollInterval);
+        
+        // Cozy play/pause trigger to warm up the video decoder and ensure the first frame renders
+        video.play()
+          .then(() => {
+            video.pause();
+          })
+          .catch((err) => {
+            console.log("Decoder warming did not start automatically or was blocked by browser autoplay rules. Safe to ignore.", err);
+          });
+      }
+    };
+
+    // Attach robust listeners for all possible events
+    video.addEventListener("loadedmetadata", checkAndInitMetadata);
+    video.addEventListener("loadeddata", checkAndInitMetadata);
+    video.addEventListener("durationchange", checkAndInitMetadata);
+    video.addEventListener("canplay", checkAndInitMetadata);
+
+    // 1. Check immediately if metadata and duration are already available (cached hit / 304 check)
+    if (video.readyState >= 1 || (video.duration && video.duration > 0)) {
+      checkAndInitMetadata();
+    } else {
+      // 2. Poll briefly in case the event calls are skipped on fast caches
+      pollInterval = setInterval(() => {
+        initAttempts++;
+        if (video.duration && video.duration > 0) {
+          checkAndInitMetadata();
+        } else if (initAttempts >= maxAttempts) {
+          clearInterval(pollInterval);
+        }
+      }, 200);
+    }
+
+    return () => {
+      video.removeEventListener("loadedmetadata", checkAndInitMetadata);
+      video.removeEventListener("loadeddata", checkAndInitMetadata);
+      video.removeEventListener("durationchange", checkAndInitMetadata);
+      video.removeEventListener("canplay", checkAndInitMetadata);
+      if (pollInterval) clearInterval(pollInterval);
+    };
+  }, []);
 
   // Manage Scroll Position and update Target Video Time
   useEffect(() => {
@@ -125,15 +181,6 @@ export default function VideoHero({ onScrollToSection }: VideoHeroProps) {
     return () => cancelAnimationFrame(animId);
   }, [videoDuration]);
 
-  // Hook on metadata loading
-  const handleMetadata = () => {
-    if (videoRef.current) {
-      setVideoDuration(videoRef.current.duration);
-      setMetadataLoaded(true);
-      setIsVideoReady(true);
-    }
-  };
-
   // Get active text phrase based on scroll progress
   const activePhrase = PHRASES.find(
     (p) => scrollProgress >= p.range[0] && scrollProgress <= p.range[1]
@@ -165,15 +212,17 @@ export default function VideoHero({ onScrollToSection }: VideoHeroProps) {
         {/* Dynamic Video Element */}
         <video
           ref={videoRef}
-          src={DEFAULT_VIDEO_URL}
           muted
           playsInline
+          autoPlay={false}
+          controls={false}
           preload="auto"
-          onLoadedMetadata={handleMetadata}
-          onCanPlay={() => setIsVideoReady(true)}
           className="absolute inset-0 w-full h-full object-cover z-0 opacity-70"
           style={{ willChange: "transform, filter" }}
-        />
+        >
+          <source src={DEFAULT_VIDEO_URL} type="video/mp4" />
+          Seu navegador não suporta a tag de vídeo html5.
+        </video>
 
 
 
