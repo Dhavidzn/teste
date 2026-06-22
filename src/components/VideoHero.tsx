@@ -224,6 +224,8 @@ export default function VideoHero({ onScrollToSection }: VideoHeroProps) {
           Seu navegador não suporta a tag de vídeo html5.
         </video>
 
+
+
         {/* Top Scroll Indicator Line */}
         <div className="absolute top-0 left-0 w-full h-[3px] bg-white/5 z-30">
           <motion.div
@@ -353,6 +355,8 @@ export default function VideoHero({ onScrollToSection }: VideoHeroProps) {
             <div className="w-1 h-2 bg-[#00f2ff] rounded-full" />
           </motion.div>
         </div>
+
+
 
       </div>
     </div>
