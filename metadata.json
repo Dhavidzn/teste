@@ -1,0 +1,6 @@
+{
+  "name": "GEO | Sensoriamento Remoto",
+  "description": "Landing page minimalista de alta precisão para soluções de inteligência geoespacial, geoprocessamento e observação da Terra.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
